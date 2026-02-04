@@ -10,7 +10,7 @@ interface Caption {
   image_id: string
   images: {
     url: string
-  } | null
+  }[]
 }
 
 const PAGE_SIZE = 36;
@@ -123,14 +123,12 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
     return null; // Don't render the card if the image fails to load
   }
 
-  // The query now ensures that images.url is not null.
-  // We can safely assume caption.images.url exists.
   return (
     <div
       className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-105"
     >
       <img
-        src={caption.images!.url}
+        src={caption.images[0]?.url}
         alt={`Image for caption: ${caption.content.substring(0, 30)}`}
         className="w-full h-48 object-cover"
         onError={() => setImageError(true)}
