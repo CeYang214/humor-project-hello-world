@@ -3,8 +3,17 @@
 import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
 
+interface Caption {
+  id: string;
+  content: string;
+  created_datetime_utc: string;
+  is_public: boolean;
+  profile_id: string;
+  image_id: string;
+}
+
 export default function Home() {
-  const [captions, setCaptions] = useState([])
+  const [captions, setCaptions] = useState<Caption[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
