@@ -39,6 +39,7 @@ export default function Home() {
       if (error) {
         console.error('Supabase error:', error)
       } else {
+        console.log('Full captions data:', data) // Log full caption data
         setCaptions(data as Caption[])
       }
       setLoading(false)
@@ -67,33 +68,56 @@ export default function Home() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {captions.map((caption) => (
-              <div
-                key={caption.id}
-                className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-105"
-              >
-                {caption.images?.url ? (
-                  <img
-                    src={caption.images.url}
-                    alt={`Image for caption: ${caption.content.substring(0, 30)}`}
-                    className="w-full h-48 object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-48 bg-gray-800 flex items-center justify-center">
-                    <p className="text-gray-500">No Image</p>
-                  </div>
-                )}
-                <div className="p-6">
-                  <p className="text-lg font-medium text-gray-100 mb-2">{caption.content}</p>
-                  <p className="text-sm text-gray-400">
-                    {new Date(caption.created_datetime_utc).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-            ))}
+            {captions
+              .filter(caption => {
+                console.log(`Caption ID: ${caption.id}, Image URL: ${caption.images?.url}`);
+                return caption.images?.url;
+              })
+              .map((caption) => (
+                <CaptionCard key={caption.id} caption={caption} />
+              ))}
           </div>
         )}
       </main>
     </div>
   )
 }
+
+interface CaptionCardProps {
+  caption: Caption;
+}
+
+const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
+  const [imageError, setImageError] = useState(false);
+
+  const handleImageError = () => {
+    setImageError(true);
+  };
+
+  return (
+    <div
+      className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-105"
+    >
+      {caption.images?.url && !imageError ? (
+        <img
+          src={caption.images.url}
+          alt={`Image for caption: ${caption.content.substring(0, 30)}`}
+          className="w-full h-48 object-cover"
+          onError={handleImageError}
+        />
+      ) : (
+        <div className="w-full h-48 bg-gray-800 flex items-center justify-center">
+          <p className="text-gray-500">
+            {imageError ? 'Image failed to load' : 'No Image'}
+          </p>
+        </div>
+      )}
+      <div className="p-6">
+        <p className="text-lg font-medium text-gray-100 mb-2">{caption.content}</p>
+        <p className="text-sm text-gray-400">
+          {new Date(caption.created_datetime_utc).toLocaleDateString()}
+        </p>
+      </div>
+    </div>
+  );
+};
