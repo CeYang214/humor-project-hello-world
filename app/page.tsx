@@ -64,6 +64,14 @@ export default function Home() {
         console.error('Supabase fetch error:', error)
       } else {
         setCaptions(data as Caption[])
+        // Log the first 3 image URLs for debugging
+        data.slice(0, 3).forEach((caption, index) => {
+          if (caption.images && caption.images[0]?.url) {
+            console.log(`Debug: Caption ${index + 1} Image URL:`, caption.images[0].url);
+          } else {
+            console.log(`Debug: Caption ${index + 1} has no image URL.`);
+          }
+        });
       }
       setLoading(false)
     }
@@ -120,18 +128,24 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
   const [imageError, setImageError] = useState(false);
 
   if (imageError) {
+    // Log which image failed to load
+    console.error('Image failed to load:', caption.images[0]?.url);
     return null; // Don't render the card if the image fails to load
   }
 
+  // The query now ensures that images.url exists.
+  // We can safely assume caption.images[0]?.url exists due to the filter and inner join.
+  // Using '!' for non-null assertion as TypeScript knows it's there.
   return (
     <div
       className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-105"
     >
       <img
-        src={caption.images[0]?.url}
+        src={caption.images[0]!.url} // Use non-null assertion as per the filter
         alt={`Image for caption: ${caption.content.substring(0, 30)}`}
         className="w-full h-48 object-cover"
         onError={() => setImageError(true)}
+        crossOrigin="anonymous" // Add crossOrigin attribute
       />
       <div className="p-6">
         <p className="text-lg font-medium text-gray-100 mb-2">{caption.content}</p>
