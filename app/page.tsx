@@ -7,15 +7,13 @@ interface Caption {
   id: string
   content: string
   created_datetime_utc: string
-  is_public: boolean
-  profile_id: string
   image_id: string
   images: {
     url: string
   } | null
 }
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 36;
 
 const SkeletonCard = () => (
   <div className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden animate-pulse">
@@ -41,7 +39,7 @@ export default function Home() {
       // First, get the total count of captions that have an image
       const { count, error: countError } = await supabase
         .from('captions')
-        .select('*, images!inner(url)', { count: 'exact', head: true })
+        .select('id, content, created_datetime_utc, image_id, images!inner(url)', { count: 'exact', head: true })
         .not('images.url', 'is', null);
 
       if (countError) {
@@ -57,7 +55,7 @@ export default function Home() {
 
       const { data, error } = await supabase
         .from('captions')
-        .select('*, images(url)')
+        .select('id, content, created_datetime_utc, image_id, images!inner(url)')
         .not('images.url', 'is', null)
         .order('created_datetime_utc', { ascending: false })
         .range(from, to)
@@ -65,7 +63,6 @@ export default function Home() {
       if (error) {
         console.error('Supabase fetch error:', error)
       } else {
-        console.log(`Page ${currentPage} captions data:`, data)
         setCaptions(data as Caption[])
       }
       setLoading(false)
@@ -101,11 +98,13 @@ export default function Home() {
                 <CaptionCard key={caption.id} caption={caption} />
               ))}
             </div>
-            <PaginationControls
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageChange={setCurrentPage}
-            />
+            {totalPages > 1 && (
+              <PaginationControls
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+              />
+            )}
           </>
         )}
       </main>
@@ -120,24 +119,22 @@ interface CaptionCardProps {
 const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
   const [imageError, setImageError] = useState(false);
 
+  if (imageError) {
+    return null; // Don't render the card if the image fails to load
+  }
+
+  // The query now ensures that images.url is not null.
+  // We can safely assume caption.images.url exists.
   return (
     <div
       className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-105"
     >
-      {caption.images?.url && !imageError ? (
-        <img
-          src={caption.images.url}
-          alt={`Image for caption: ${caption.content.substring(0, 30)}`}
-          className="w-full h-48 object-cover"
-          onError={() => setImageError(true)}
-        />
-      ) : (
-        <div className="w-full h-48 bg-gray-800 flex items-center justify-center">
-          <p className="text-gray-500">
-            {imageError ? 'Image failed to load' : 'No Image'}
-          </p>
-        </div>
-      )}
+      <img
+        src={caption.images!.url}
+        alt={`Image for caption: ${caption.content.substring(0, 30)}`}
+        className="w-full h-48 object-cover"
+        onError={() => setImageError(true)}
+      />
       <div className="p-6">
         <p className="text-lg font-medium text-gray-100 mb-2">{caption.content}</p>
         <p className="text-sm text-gray-400">
@@ -169,7 +166,7 @@ const PaginationControls: React.FC<PaginationControlsProps> = ({ currentPage, to
       </span>
       <button
         onClick={() => onPageChange(currentPage + 1)}
-        disabled={currentPage === totalPages}
+        disabled={currentPage === totalPages || totalPages === 0}
         className="px-4 py-2 bg-purple-600/50 rounded-lg backdrop-blur-sm text-white font-semibold transition-colors duration-300 hover:bg-purple-600/80 disabled:bg-gray-600/50 disabled:cursor-not-allowed"
       >
         Next
