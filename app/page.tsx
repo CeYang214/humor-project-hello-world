@@ -34,7 +34,7 @@ export default function Home() {
       const { data, error } = await supabase
         .from('captions')
         .select('*, images(url)')
-        .limit(20)
+        .limit(100)
 
       if (error) {
         console.error('Supabase error:', error)
