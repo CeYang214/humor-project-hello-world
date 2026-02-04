@@ -7,13 +7,11 @@ interface Caption {
   id: string
   content: string
   created_datetime_utc: string
+  is_public: boolean
+  profile_id: string
   image_id: string
-  images: {
-    url: string
-  }[]
+  imageUrl?: string // We'll add the URL separately
 }
-
-const PAGE_SIZE = 36;
 
 const SkeletonCard = () => (
   <div className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden animate-pulse">
@@ -28,58 +26,107 @@ const SkeletonCard = () => (
 export default function Home() {
   const [captions, setCaptions] = useState<Caption[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const captionsPerPage = 36
 
   useEffect(() => {
-    async function fetchPaginatedCaptions() {
-      setLoading(true);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-
-      // First, get the total count of captions that have an image
-      const { count, error: countError } = await supabase
-        .from('captions')
-        .select('id, content, created_datetime_utc, image_id, images!inner(url)', { count: 'exact', head: true })
-        .not('images.url', 'is', null);
-
-      if (countError) {
-        console.error('Supabase count error:', countError);
-        setTotalCount(0);
-      } else {
-        setTotalCount(count || 0);
-      }
-
-      // Then, fetch the data for the current page
-      const from = (currentPage - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-
-      const { data, error } = await supabase
-        .from('captions')
-        .select('id, content, created_datetime_utc, image_id, images!inner(url)')
-        .not('images.url', 'is', null)
-        .order('created_datetime_utc', { ascending: false })
-        .range(from, to)
-
-      if (error) {
-        console.error('Supabase fetch error:', error)
-      } else {
-        setCaptions(data as Caption[])
-        // Log the first 3 image URLs for debugging
-        data.slice(0, 3).forEach((caption, index) => {
-          if (caption.images && caption.images[0]?.url) {
-            console.log(`Debug: Caption ${index + 1} Image URL:`, caption.images[0].url);
-          } else {
-            console.log(`Debug: Caption ${index + 1} has no image URL.`);
-          }
-        });
-      }
-      setLoading(false)
-    }
-
-    fetchPaginatedCaptions()
+    fetchCaptions()
   }, [currentPage])
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  async function fetchCaptions() {
+    setLoading(true)
+
+    // Fetch MORE captions than we need (about 2x-3x) to account for missing images
+    const fetchMultiplier = 3
+    const from = (currentPage - 1) * captionsPerPage * fetchMultiplier
+    const to = from + (captionsPerPage * fetchMultiplier) - 1
+
+    console.log(`Fetching captions from ${from} to ${to} for page ${currentPage}`)
+
+    // Fetch captions with their image_id
+    const { data: captionsData, error: captionsError } = await supabase
+      .from('captions')
+      .select('id, content, created_datetime_utc, is_public, profile_id, image_id')
+      .range(from, to)
+
+    if (captionsError) {
+      console.error('Supabase captions error:', captionsError)
+      setLoading(false)
+      return
+    }
+
+    if (!captionsData || captionsData.length === 0) {
+      console.log('No captions data returned')
+      setCaptions([])
+      setLoading(false)
+      return
+    }
+
+    console.log(`Fetched ${captionsData.length} captions`)
+
+    // Get unique image IDs
+    const imageIds = [...new Set(captionsData.map(c => c.image_id).filter(Boolean))]
+    console.log(`Found ${imageIds.length} unique image IDs`)
+
+    // Fetch all images at once
+    const { data: imagesData, error: imagesError } = await supabase
+      .from('images')
+      .select('id, url')
+      .in('id', imageIds)
+
+    if (imagesError) {
+      console.error('Supabase images error:', imagesError)
+    }
+
+    console.log(`Fetched ${imagesData?.length || 0} images`)
+
+    // Create a map of image_id to url
+    const imageMap = new Map(imagesData?.map(img => [img.id, img.url]) || [])
+
+    // Add image URLs to captions
+    const captionsWithImages = captionsData.map(caption => ({
+      ...caption,
+      imageUrl: imageMap.get(caption.image_id) || undefined
+    }))
+
+    // Filter to only captions with valid image URLs
+    const validCaptions = captionsWithImages.filter(c => c.imageUrl && c.imageUrl.trim() !== '')
+
+    console.log(`${validCaptions.length} captions have valid images`)
+
+    // Take exactly 36 (or whatever we have if less)
+    const finalCaptions = validCaptions.slice(0, captionsPerPage)
+    console.log(`Displaying ${finalCaptions.length} captions on this page`)
+
+    setCaptions(finalCaptions)
+    setLoading(false)
+
+    // Get total count for pagination (only on first load)
+    if (currentPage === 1) {
+      const { count } = await supabase
+        .from('captions')
+        .select('*', { count: 'exact', head: true })
+
+      if (count) {
+        setTotalPages(Math.ceil(count / (captionsPerPage * fetchMultiplier)))
+      }
+    }
+  }
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(prev => prev + 1)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
+  const goToPrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(prev => prev - 1)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
@@ -95,9 +142,13 @@ export default function Home() {
 
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {Array.from({ length: 12 }).map((_, i) => (
+            {Array.from({ length: 8 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
+          </div>
+        ) : captions.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-xl text-gray-400">No captions with images found on this page.</p>
           </div>
         ) : (
           <>
@@ -106,13 +157,37 @@ export default function Home() {
                 <CaptionCard key={caption.id} caption={caption} />
               ))}
             </div>
-            {totalPages > 1 && (
-              <PaginationControls
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={setCurrentPage}
-              />
-            )}
+
+            {/* Pagination Controls */}
+            <div className="flex items-center justify-center gap-6 mt-12">
+              <button
+                onClick={goToPrevPage}
+                disabled={currentPage === 1}
+                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                  currentPage === 1
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg hover:shadow-xl'
+                }`}
+              >
+                Previous
+              </button>
+
+              <span className="text-lg font-medium text-gray-300">
+                Page {currentPage} of {totalPages}
+              </span>
+
+              <button
+                onClick={goToNextPage}
+                disabled={currentPage === totalPages}
+                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                  currentPage === totalPages
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg hover:shadow-xl'
+                }`}
+              >
+                Next
+              </button>
+            </div>
           </>
         )}
       </main>
@@ -121,32 +196,32 @@ export default function Home() {
 }
 
 interface CaptionCardProps {
-  caption: Caption;
+  caption: Caption
 }
 
 const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
-  const [imageError, setImageError] = useState(false);
+  const [imageError, setImageError] = useState(false)
 
-  if (imageError) {
-    // Log which image failed to load
-    console.error('Image failed to load:', caption.images[0]?.url);
-    return null; // Don't render the card if the image fails to load
+  const handleImageError = () => {
+    setImageError(true)
   }
 
-  // The query now ensures that images.url exists.
-  // We can safely assume caption.images[0]?.url exists due to the filter and inner join.
-  // Using '!' for non-null assertion as TypeScript knows it's there.
   return (
-    <div
-      className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-105"
-    >
-      <img
-        src={caption.images[0]!.url} // Use non-null assertion as per the filter
-        alt={`Image for caption: ${caption.content.substring(0, 30)}`}
-        className="w-full h-48 object-cover"
-        onError={() => setImageError(true)}
-        crossOrigin="anonymous" // Add crossOrigin attribute
-      />
+    <div className="bg-white/10 backdrop-blur-lg rounded-xl shadow-lg overflow-hidden transition-all duration-300 ease-in-out hover:shadow-2xl hover:scale-105">
+      {caption.imageUrl && !imageError ? (
+        <img
+          src={caption.imageUrl}
+          alt={`Image for caption: ${caption.content.substring(0, 30)}`}
+          className="w-full h-48 object-cover"
+          onError={handleImageError}
+        />
+      ) : (
+        <div className="w-full h-48 bg-gray-800 flex items-center justify-center">
+          <p className="text-gray-500">
+            {imageError ? 'Image failed to load' : 'No Image'}
+          </p>
+        </div>
+      )}
       <div className="p-6">
         <p className="text-lg font-medium text-gray-100 mb-2">{caption.content}</p>
         <p className="text-sm text-gray-400">
@@ -154,35 +229,5 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
         </p>
       </div>
     </div>
-  );
-};
-
-interface PaginationControlsProps {
-  currentPage: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
-}
-
-const PaginationControls: React.FC<PaginationControlsProps> = ({ currentPage, totalPages, onPageChange }) => {
-  return (
-    <div className="flex items-center justify-center space-x-4 mt-12">
-      <button
-        onClick={() => onPageChange(currentPage - 1)}
-        disabled={currentPage === 1}
-        className="px-4 py-2 bg-purple-600/50 rounded-lg backdrop-blur-sm text-white font-semibold transition-colors duration-300 hover:bg-purple-600/80 disabled:bg-gray-600/50 disabled:cursor-not-allowed"
-      >
-        Previous
-      </button>
-      <span className="text-lg font-medium text-gray-300">
-        Page {currentPage} of {totalPages}
-      </span>
-      <button
-        onClick={() => onPageChange(currentPage + 1)}
-        disabled={currentPage === totalPages || totalPages === 0}
-        className="px-4 py-2 bg-purple-600/50 rounded-lg backdrop-blur-sm text-white font-semibold transition-colors duration-300 hover:bg-purple-600/80 disabled:bg-gray-600/50 disabled:cursor-not-allowed"
-      >
-        Next
-      </button>
-    </div>
-  );
+  )
 }
