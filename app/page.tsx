@@ -1,7 +1,9 @@
 'use client'
 
-import { supabase } from '@/lib/supabase'
-import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { User } from '@supabase/supabase-js'
+import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
 
 interface Caption {
   id: string
@@ -24,15 +26,36 @@ const SkeletonCard = () => (
 )
 
 export default function Home() {
+  const supabase = useMemo(() => createClient(), [])
   const [captions, setCaptions] = useState<Caption[]>([])
   const [loading, setLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
+  const [user, setUser] = useState<User | null>(null)
   const captionsPerPage = 36
 
   useEffect(() => {
     fetchCaptions()
   }, [currentPage])
+
+  useEffect(() => {
+    let cancelled = false
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (!cancelled) {
+        setUser(data.user ?? null)
+      }
+    })
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => {
+      cancelled = true
+      authListener.subscription.unsubscribe()
+    }
+  }, [supabase])
 
   async function fetchCaptions() {
     setLoading(true)
@@ -128,9 +151,55 @@ export default function Home() {
     }
   }
 
+  const handleSignIn = async () => {
+    const origin = window.location.origin
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${origin}/auth/callback`,
+      },
+    })
+  }
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
       <main className="container mx-auto px-4 py-12">
+        <div className="mb-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+          <div className="text-sm text-gray-300">
+            {user ? (
+              <span>Signed in as {user.email ?? 'Google user'}</span>
+            ) : (
+              <span>Sign in to access the gated route.</span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/protected"
+              className="rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+            >
+              Go to Gated Route
+            </Link>
+            {user ? (
+              <button
+                onClick={handleSignOut}
+                className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+              >
+                Sign out
+              </button>
+            ) : (
+              <button
+                onClick={handleSignIn}
+                className="rounded-full bg-gradient-to-r from-blue-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-sky-600"
+              >
+                Continue with Google
+              </button>
+            )}
+          </div>
+        </div>
         <header className="text-center mb-12">
           <h1 className="text-5xl font-extrabold tracking-tight mb-4 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
             Caption Gallery
@@ -139,6 +208,23 @@ export default function Home() {
             A curated collection of creative and witty captions, paired with their inspiring images.
           </p>
         </header>
+
+        <section className="mx-auto mb-12 max-w-4xl">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Authentication</p>
+              <p className="mt-3 text-lg text-white">
+                Are you who you say you are?
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Authorization</p>
+              <p className="mt-3 text-lg text-white">
+                Do you have permission to access what you’re trying to access?
+              </p>
+            </div>
+          </div>
+        </section>
 
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
@@ -227,6 +313,7 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
         <p className="text-sm text-gray-400">
           {new Date(caption.created_datetime_utc).toLocaleDateString()}
         </p>
+
       </div>
     </div>
   )
