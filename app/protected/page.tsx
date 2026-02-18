@@ -16,11 +16,23 @@ export default function ProtectedPage() {
   useEffect(() => {
     let cancelled = false
 
-    supabase.auth.getUser().then(({ data }) => {
-      if (!cancelled) {
-        setUser(data.user ?? null)
+    const syncUser = async () => {
+      const { data, error } = await supabase.auth.getUser()
+
+      if (cancelled) return
+
+      if (error) {
+        const isInvalidRefreshToken = /invalid refresh token|refresh token not found/i.test(error.message)
+        if (isInvalidRefreshToken) {
+          await supabase.auth.signOut({ scope: 'local' })
+        }
+        setUser(null)
+        return
       }
-    })
+      setUser(data.user ?? null)
+    }
+
+    void syncUser()
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)

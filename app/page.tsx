@@ -32,30 +32,9 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [user, setUser] = useState<User | null>(null)
+  const [voteStatus, setVoteStatus] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({})
+  const [voteMessage, setVoteMessage] = useState<Record<string, string>>({})
   const captionsPerPage = 36
-
-  useEffect(() => {
-    fetchCaptions()
-  }, [currentPage])
-
-  useEffect(() => {
-    let cancelled = false
-
-    supabase.auth.getUser().then(({ data }) => {
-      if (!cancelled) {
-        setUser(data.user ?? null)
-      }
-    })
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    return () => {
-      cancelled = true
-      authListener.subscription.unsubscribe()
-    }
-  }, [supabase])
 
   async function fetchCaptions() {
     setLoading(true)
@@ -137,6 +116,42 @@ export default function Home() {
     }
   }
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchCaptions()
+  }, [currentPage])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const syncUser = async () => {
+      const { data, error } = await supabase.auth.getUser()
+
+      if (cancelled) return
+
+      if (error) {
+        const isInvalidRefreshToken = /invalid refresh token|refresh token not found/i.test(error.message)
+        if (isInvalidRefreshToken) {
+          await supabase.auth.signOut({ scope: 'local' })
+        }
+        setUser(null)
+        return
+      }
+      setUser(data.user ?? null)
+    }
+
+    void syncUser()
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => {
+      cancelled = true
+      authListener.subscription.unsubscribe()
+    }
+  }, [supabase])
+
   const goToNextPage = () => {
     if (currentPage < totalPages) {
       setCurrentPage(prev => prev + 1)
@@ -163,6 +178,34 @@ export default function Home() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
+  }
+
+  const handleVote = async (captionId: string, value: number) => {
+    if (!user) {
+      setVoteStatus(prev => ({ ...prev, [captionId]: 'error' }))
+      setVoteMessage(prev => ({ ...prev, [captionId]: 'Sign in to vote.' }))
+      return
+    }
+
+    setVoteStatus(prev => ({ ...prev, [captionId]: 'saving' }))
+    setVoteMessage(prev => ({ ...prev, [captionId]: '' }))
+
+    const { error } = await supabase.from('caption_votes').insert({
+      caption_id: captionId,
+      profile_id: user.id,
+      vote_value: value,
+      created_datetime_utc: new Date().toISOString(),
+      modified_datetime_utc: new Date().toISOString(),
+    })
+
+    if (error) {
+      setVoteStatus(prev => ({ ...prev, [captionId]: 'error' }))
+      setVoteMessage(prev => ({ ...prev, [captionId]: error.message }))
+      return
+    }
+
+    setVoteStatus(prev => ({ ...prev, [captionId]: 'success' }))
+    setVoteMessage(prev => ({ ...prev, [captionId]: 'Vote recorded.' }))
   }
 
   return (
@@ -240,7 +283,14 @@ export default function Home() {
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
               {captions.map((caption) => (
-                <CaptionCard key={caption.id} caption={caption} />
+                <CaptionCard
+                  key={caption.id}
+                  caption={caption}
+                  canVote={Boolean(user)}
+                  status={voteStatus[caption.id] ?? 'idle'}
+                  message={voteMessage[caption.id] ?? ''}
+                  onVote={handleVote}
+                />
               ))}
             </div>
 
@@ -283,9 +333,13 @@ export default function Home() {
 
 interface CaptionCardProps {
   caption: Caption
+  canVote: boolean
+  status: 'idle' | 'saving' | 'success' | 'error'
+  message: string
+  onVote: (captionId: string, value: number) => void
 }
 
-const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
+const CaptionCard: React.FC<CaptionCardProps> = ({ caption, canVote, status, message, onVote }) => {
   const [imageError, setImageError] = useState(false)
 
   const handleImageError = () => {
@@ -314,6 +368,35 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption }) => {
           {new Date(caption.created_datetime_utc).toLocaleDateString()}
         </p>
 
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            onClick={() => onVote(caption.id, 1)}
+            disabled={!canVote || status === 'saving'}
+            className="rounded-full border border-white/20 px-4 py-1 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Upvote
+          </button>
+          <button
+            onClick={() => onVote(caption.id, -1)}
+            disabled={!canVote || status === 'saving'}
+            className="rounded-full border border-white/20 px-4 py-1 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Downvote
+          </button>
+          {!canVote && (
+            <span className="text-xs text-gray-400">Sign in to vote</span>
+          )}
+        </div>
+
+        {message && (
+          <p
+            className={`mt-3 text-xs ${
+              status === 'success' ? 'text-emerald-300' : 'text-rose-300'
+            }`}
+          >
+            {message}
+          </p>
+        )}
       </div>
     </div>
   )
