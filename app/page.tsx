@@ -33,6 +33,7 @@ export default function Home() {
   const [totalPages, setTotalPages] = useState(0)
   const [pageInput, setPageInput] = useState('1')
   const [user, setUser] = useState<User | null>(null)
+  const [userVotes, setUserVotes] = useState<Record<string, number>>({})
   const [voteStatus, setVoteStatus] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({})
   const [voteMessage, setVoteMessage] = useState<Record<string, string>>({})
   const captionsPerPage = 36
@@ -146,7 +147,7 @@ export default function Home() {
 
     void syncUser()
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
     })
 
@@ -155,6 +156,43 @@ export default function Home() {
       authListener.subscription.unsubscribe()
     }
   }, [supabase])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadVotes = async () => {
+      if (!user || captions.length === 0) {
+        setUserVotes({})
+        return
+      }
+
+      const captionIds = captions.map(caption => caption.id)
+      const { data, error } = await supabase
+        .from('caption_votes')
+        .select('caption_id, vote_value')
+        .eq('profile_id', user.id)
+        .in('caption_id', captionIds)
+
+      if (cancelled) return
+
+      if (error) {
+        console.error('Supabase caption_votes error:', error)
+        return
+      }
+
+      const votesByCaption: Record<string, number> = {}
+      data?.forEach((vote) => {
+        votesByCaption[vote.caption_id] = vote.vote_value
+      })
+      setUserVotes(votesByCaption)
+    }
+
+    void loadVotes()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, captions, supabase])
 
   const goToPage = (page: number) => {
     if (totalPages < 1) return
@@ -226,6 +264,7 @@ export default function Home() {
       return
     }
 
+    setUserVotes(prev => ({ ...prev, [captionId]: value }))
     setVoteStatus(prev => ({ ...prev, [captionId]: 'success' }))
     setVoteMessage(prev => ({ ...prev, [captionId]: 'Vote saved.' }))
   }
@@ -309,6 +348,7 @@ export default function Home() {
                   key={caption.id}
                   caption={caption}
                   canVote={Boolean(user)}
+                  userVote={userVotes[caption.id]}
                   status={voteStatus[caption.id] ?? 'idle'}
                   message={voteMessage[caption.id] ?? ''}
                   onVote={handleVote}
@@ -378,12 +418,13 @@ export default function Home() {
 interface CaptionCardProps {
   caption: Caption
   canVote: boolean
+  userVote?: number
   status: 'idle' | 'saving' | 'success' | 'error'
   message: string
   onVote: (captionId: string, value: number) => void
 }
 
-const CaptionCard: React.FC<CaptionCardProps> = ({ caption, canVote, status, message, onVote }) => {
+const CaptionCard: React.FC<CaptionCardProps> = ({ caption, canVote, userVote, status, message, onVote }) => {
   const [imageError, setImageError] = useState(false)
 
   const handleImageError = () => {
@@ -416,19 +457,33 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption, canVote, status, mes
           <button
             onClick={() => onVote(caption.id, 1)}
             disabled={!canVote || status === 'saving'}
-            className="rounded-full border border-white/20 px-4 py-1 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className={`rounded-full border px-4 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              userVote === 1
+                ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                : 'border-white/20 text-white hover:border-white/40 hover:bg-white/10'
+            }`}
           >
             Upvote
           </button>
           <button
             onClick={() => onVote(caption.id, -1)}
             disabled={!canVote || status === 'saving'}
-            className="rounded-full border border-white/20 px-4 py-1 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className={`rounded-full border px-4 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              userVote === -1
+                ? 'border-rose-400 bg-rose-500/20 text-rose-200'
+                : 'border-white/20 text-white hover:border-white/40 hover:bg-white/10'
+            }`}
           >
             Downvote
           </button>
           {!canVote && (
             <span className="text-xs text-gray-400">Sign in to vote</span>
+          )}
+          {canVote && userVote === 1 && (
+            <span className="text-xs text-emerald-300">You upvoted this.</span>
+          )}
+          {canVote && userVote === -1 && (
+            <span className="text-xs text-rose-300">You downvoted this.</span>
           )}
         </div>
 
