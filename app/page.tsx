@@ -31,6 +31,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
+  const [pageInput, setPageInput] = useState('1')
   const [user, setUser] = useState<User | null>(null)
   const [voteStatus, setVoteStatus] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({})
   const [voteMessage, setVoteMessage] = useState<Record<string, string>>({})
@@ -117,8 +118,11 @@ export default function Home() {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchCaptions()
+  }, [currentPage])
+
+  useEffect(() => {
+    setPageInput(String(currentPage))
   }, [currentPage])
 
   useEffect(() => {
@@ -152,18 +156,30 @@ export default function Home() {
     }
   }, [supabase])
 
+  const goToPage = (page: number) => {
+    if (totalPages < 1) return
+    const clampedPage = Math.min(Math.max(page, 1), totalPages)
+    if (clampedPage === currentPage) return
+    setCurrentPage(clampedPage)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const goToNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(prev => prev + 1)
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
+    goToPage(currentPage + 1)
   }
 
   const goToPrevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(prev => prev - 1)
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+    goToPage(currentPage - 1)
+  }
+
+  const handlePageJump = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const parsedPage = Number.parseInt(pageInput, 10)
+    if (Number.isNaN(parsedPage)) {
+      setPageInput(String(currentPage))
+      return
     }
+    goToPage(parsedPage)
   }
 
   const handleSignIn = async () => {
@@ -190,13 +206,19 @@ export default function Home() {
     setVoteStatus(prev => ({ ...prev, [captionId]: 'saving' }))
     setVoteMessage(prev => ({ ...prev, [captionId]: '' }))
 
-    const { error } = await supabase.from('caption_votes').insert({
-      caption_id: captionId,
-      profile_id: user.id,
-      vote_value: value,
-      created_datetime_utc: new Date().toISOString(),
-      modified_datetime_utc: new Date().toISOString(),
-    })
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('caption_votes').upsert(
+      {
+        caption_id: captionId,
+        profile_id: user.id,
+        vote_value: value,
+        created_datetime_utc: now,
+        modified_datetime_utc: now,
+      },
+      {
+        onConflict: 'profile_id,caption_id',
+      }
+    )
 
     if (error) {
       setVoteStatus(prev => ({ ...prev, [captionId]: 'error' }))
@@ -205,7 +227,7 @@ export default function Home() {
     }
 
     setVoteStatus(prev => ({ ...prev, [captionId]: 'success' }))
-    setVoteMessage(prev => ({ ...prev, [captionId]: 'Vote recorded.' }))
+    setVoteMessage(prev => ({ ...prev, [captionId]: 'Vote saved.' }))
   }
 
   return (
@@ -311,6 +333,28 @@ export default function Home() {
               <span className="text-lg font-medium text-gray-300">
                 Page {currentPage} of {totalPages}
               </span>
+
+              <form onSubmit={handlePageJump} className="flex items-center gap-2">
+                <label htmlFor="page-input" className="text-sm text-gray-300">
+                  Go to
+                </label>
+                <input
+                  id="page-input"
+                  type="number"
+                  min={1}
+                  max={totalPages || 1}
+                  value={pageInput}
+                  onChange={(event) => setPageInput(event.target.value)}
+                  className="w-20 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white focus:border-white/40 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={totalPages < 1}
+                  className="rounded-lg border border-white/20 px-3 py-2 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Go
+                </button>
+              </form>
 
               <button
                 onClick={goToNextPage}
