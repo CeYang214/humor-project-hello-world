@@ -2,15 +2,90 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+
+const PIPELINE_BASE_URL = 'https://api.almostcrackd.ai'
+const SUPPORTED_CONTENT_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/heic',
+])
+const ACCEPTED_IMAGE_TYPES = 'image/jpeg,image/jpg,image/png,image/webp,image/gif,image/heic'
+
+type UiStatus = 'idle' | 'saving' | 'success' | 'error'
+
+interface GeneratePresignedUrlResponse {
+  presignedUrl: string
+  cdnUrl: string
+}
+
+interface UploadImageFromUrlResponse {
+  imageId: string
+}
+
+type CaptionRecord = Record<string, unknown>
+
+function getCaptionText(record: CaptionRecord, index: number) {
+  const candidates = ['content', 'caption', 'text', 'captionText', 'title']
+
+  for (const field of candidates) {
+    const value = record[field]
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim()
+    }
+  }
+
+  return `Caption ${index + 1}`
+}
+
+async function parseErrorBody(response: Response) {
+  const rawBody = await response.text()
+
+  if (!rawBody) {
+    return `Request failed with status ${response.status}.`
+  }
+
+  try {
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>
+    if (typeof parsed.message === 'string') return parsed.message
+    if (typeof parsed.error === 'string') return parsed.error
+    return rawBody
+  } catch {
+    return rawBody
+  }
+}
+
+async function callPipelineApi<T>(path: string, token: string, payload: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${PIPELINE_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const errorBody = await parseErrorBody(response)
+    throw new Error(errorBody)
+  }
+
+  return (await response.json()) as T
+}
 
 export default function ProtectedPage() {
   const supabase = useMemo(() => createClient(), [])
   const [user, setUser] = useState<User | null>(null)
-  const [caption, setCaption] = useState('')
-  const [imageUrl, setImageUrl] = useState('')
-  const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [uploadedImageUrl, setUploadedImageUrl] = useState('')
+  const [generatedCaptions, setGeneratedCaptions] = useState<CaptionRecord[]>([])
+  const [status, setStatus] = useState<UiStatus>('idle')
   const [message, setMessage] = useState('')
 
   useEffect(() => {
@@ -44,60 +119,140 @@ export default function ProtectedPage() {
     }
   }, [supabase])
 
+  useEffect(() => {
+    if (!selectedFile) {
+      setPreviewUrl(null)
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(selectedFile)
+    setPreviewUrl(objectUrl)
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [selectedFile])
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     window.location.href = '/'
   }
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null
+    setSelectedFile(file)
+    setStatus('idle')
+    setMessage('')
+    setGeneratedCaptions([])
+    setUploadedImageUrl('')
+  }
+
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setStatus('saving')
     setMessage('')
+    setGeneratedCaptions([])
+    setUploadedImageUrl('')
 
     if (!user) {
       setStatus('error')
-      setMessage('You must be signed in to add a caption.')
+      setMessage('You must be signed in to generate captions.')
       return
     }
 
-    if (!caption.trim() || !imageUrl.trim()) {
+    if (!selectedFile) {
       setStatus('error')
-      setMessage('Caption and image URL are required.')
+      setMessage('Please choose an image file first.')
       return
     }
 
-    const { data: imageRow, error: imageError } = await supabase
-      .from('images')
-      .insert({
-        url: imageUrl.trim(),
+    const contentType = selectedFile.type.toLowerCase()
+    if (!SUPPORTED_CONTENT_TYPES.has(contentType)) {
+      setStatus('error')
+      setMessage(`Unsupported file type "${contentType || 'unknown'}". Use jpeg, jpg, png, webp, gif, or heic.`)
+      return
+    }
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    const accessToken = sessionData.session?.access_token
+    if (sessionError || !accessToken) {
+      setStatus('error')
+      setMessage(sessionError?.message ?? 'Could not read auth session access token.')
+      return
+    }
+
+    try {
+      setMessage('Step 1/4: Generating presigned upload URL...')
+      const presignedResponse = await callPipelineApi<GeneratePresignedUrlResponse>(
+        '/pipeline/generate-presigned-url',
+        accessToken,
+        { contentType }
+      )
+
+      if (!presignedResponse.presignedUrl || !presignedResponse.cdnUrl) {
+        throw new Error('Missing presignedUrl/cdnUrl in response.')
+      }
+
+      setMessage('Step 2/4: Uploading image bytes...')
+      const uploadResponse = await fetch(presignedResponse.presignedUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': contentType,
+        },
+        body: selectedFile,
       })
-      .select('id')
-      .single()
 
-    if (imageError || !imageRow) {
+      if (!uploadResponse.ok) {
+        const uploadError = await parseErrorBody(uploadResponse)
+        throw new Error(`Upload failed: ${uploadError}`)
+      }
+
+      setUploadedImageUrl(presignedResponse.cdnUrl)
+
+      setMessage('Step 3/4: Registering uploaded image URL...')
+      const uploadImageResponse = await callPipelineApi<UploadImageFromUrlResponse>(
+        '/pipeline/upload-image-from-url',
+        accessToken,
+        {
+          imageUrl: presignedResponse.cdnUrl,
+          isCommonUse: false,
+        }
+      )
+
+      if (!uploadImageResponse.imageId) {
+        throw new Error('Missing imageId in upload-image-from-url response.')
+      }
+
+      setMessage('Step 4/4: Generating captions...')
+      const generatedRecords = await callPipelineApi<unknown>(
+        '/pipeline/generate-captions',
+        accessToken,
+        {
+          imageId: uploadImageResponse.imageId,
+        }
+      )
+
+      const captions = Array.isArray(generatedRecords)
+        ? generatedRecords
+        : Array.isArray((generatedRecords as { captions?: unknown[] })?.captions)
+          ? ((generatedRecords as { captions: unknown[] }).captions)
+          : []
+
+      const normalizedCaptions = captions.filter(
+        (item): item is CaptionRecord => Boolean(item && typeof item === 'object')
+      )
+
+      setGeneratedCaptions(normalizedCaptions)
+      setStatus('success')
+      setMessage(
+        normalizedCaptions.length > 0
+          ? `Done. Generated ${normalizedCaptions.length} caption(s).`
+          : 'Pipeline completed, but no caption records were returned.'
+      )
+    } catch (error: unknown) {
       setStatus('error')
-      setMessage(imageError?.message ?? 'Failed to create image.')
-      return
+      setMessage(error instanceof Error ? error.message : 'Pipeline request failed.')
     }
-
-    const { error: captionError } = await supabase.from('captions').insert({
-      content: caption.trim(),
-      image_id: imageRow.id,
-      profile_id: user.id,
-      is_public: true,
-      created_datetime_utc: new Date().toISOString(),
-    })
-
-    if (captionError) {
-      setStatus('error')
-      setMessage(captionError.message)
-      return
-    }
-
-    setStatus('success')
-    setMessage('Caption created successfully.')
-    setCaption('')
-    setImageUrl('')
   }
 
   return (
@@ -119,34 +274,38 @@ export default function ProtectedPage() {
 
           {user ? (
             <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Create Caption</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Caption Pipeline Upload</p>
               <p className="mt-2 text-sm text-slate-300">
-                This writes to Supabase and demonstrates authenticated data mutation.
+                Upload an image and run the 4-step pipeline with your JWT access token.
               </p>
 
               <form onSubmit={handleSubmit} className="mt-4 grid gap-4">
                 <label className="grid gap-2 text-sm text-slate-200">
-                  Caption
-                  <textarea
-                    value={caption}
-                    onChange={(event) => setCaption(event.target.value)}
-                    rows={3}
-                    className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-                    placeholder="Write a new caption..."
-                  />
-                </label>
-
-                <label className="grid gap-2 text-sm text-slate-200">
-                  Image URL
+                  Image file
                   <input
-                    value={imageUrl}
-                    onChange={(event) => setImageUrl(event.target.value)}
-                    type="url"
+                    type="file"
+                    accept={ACCEPTED_IMAGE_TYPES}
+                    onChange={handleFileChange}
                     className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-                    placeholder="https://example.com/image.jpg"
                     required
                   />
                 </label>
+
+                <p className="text-xs text-slate-400">
+                  Supported types: image/jpeg, image/jpg, image/png, image/webp, image/gif, image/heic
+                </p>
+
+                {previewUrl && (
+                  <div className="relative h-72 overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+                    <Image
+                      src={previewUrl}
+                      alt="Selected upload preview"
+                      fill
+                      unoptimized
+                      className="object-contain"
+                    />
+                  </div>
+                )}
 
                 {message && (
                   <div
@@ -165,13 +324,45 @@ export default function ProtectedPage() {
                   disabled={status === 'saving'}
                   className="mt-2 w-fit rounded-full bg-gradient-to-r from-blue-500 to-sky-500 px-6 py-2 text-sm font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {status === 'saving' ? 'Saving...' : 'Create Caption'}
+                  {status === 'saving' ? 'Running Pipeline...' : 'Upload & Generate Captions'}
                 </button>
               </form>
+
+              {uploadedImageUrl && (
+                <div className="mt-6 rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm">
+                  <p className="text-sky-100">Registered image URL:</p>
+                  <p className="mt-1 break-all text-sky-200">{uploadedImageUrl}</p>
+                </div>
+              )}
+
+              <div className="mt-6">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Generated Captions</p>
+                {generatedCaptions.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-300">No generated captions yet.</p>
+                ) : (
+                  <div className="mt-3 grid gap-3">
+                    {generatedCaptions.map((record, index) => {
+                      const keyValue = record.id
+                      const key =
+                        typeof keyValue === 'string' || typeof keyValue === 'number'
+                          ? String(keyValue)
+                          : `generated-${index}`
+
+                      return (
+                        <div key={key} className="rounded-xl border border-white/10 bg-black/30 p-4">
+                          <p className="text-base font-medium text-white">
+                            {getCaptionText(record, index)}
+                          </p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-slate-300">
-              Sign in to create new captions.
+              Sign in to upload images and generate captions.
             </div>
           )}
 

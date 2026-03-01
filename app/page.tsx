@@ -313,23 +313,6 @@ export default function Home() {
           </p>
         </header>
 
-        <section className="mx-auto mb-12 max-w-4xl">
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Authentication</p>
-              <p className="mt-3 text-lg text-white">
-                Are you who you say you are?
-              </p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg backdrop-blur">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Authorization</p>
-              <p className="mt-3 text-lg text-white">
-                Do you have permission to access what you’re trying to access?
-              </p>
-            </div>
-          </div>
-        </section>
-
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
             {Array.from({ length: 8 }).map((_, i) => (
