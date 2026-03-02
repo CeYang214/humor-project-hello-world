@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 const PIPELINE_BASE_URL = 'https://api.almostcrackd.ai'
 const SUPPORTED_CONTENT_TYPES = new Set([
@@ -28,6 +28,25 @@ interface UploadImageFromUrlResponse {
   imageId: string
 }
 
+interface PersistedCaptionRow {
+  id: string
+  content: string | null
+  created_datetime_utc: string | null
+  image_id: string
+}
+
+interface PersistedImageRow {
+  id: string
+  url: string | null
+}
+
+interface CaptionHistoryGroup {
+  imageId: string
+  imageUrl: string
+  captions: CaptionRecord[]
+  latestCreatedAt: string
+}
+
 type CaptionRecord = Record<string, unknown>
 
 function getCaptionText(record: CaptionRecord, index: number) {
@@ -41,6 +60,14 @@ function getCaptionText(record: CaptionRecord, index: number) {
   }
 
   return `Caption ${index + 1}`
+}
+
+function formatTimestamp(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return date.toLocaleString()
 }
 
 async function parseErrorBody(response: Response) {
@@ -85,8 +112,120 @@ export default function ProtectedPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [uploadedImageUrl, setUploadedImageUrl] = useState('')
   const [generatedCaptions, setGeneratedCaptions] = useState<CaptionRecord[]>([])
+  const [captionHistory, setCaptionHistory] = useState<CaptionHistoryGroup[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
   const [status, setStatus] = useState<UiStatus>('idle')
   const [message, setMessage] = useState('')
+
+  const loadSavedHistory = useCallback(
+    async (profileId: string, hydrateLatest: boolean) => {
+      setHistoryLoading(true)
+
+      try {
+        const { data: captionsData, error: captionsError } = await supabase
+          .from('captions')
+          .select('id, content, created_datetime_utc, image_id')
+          .eq('profile_id', profileId)
+          .order('created_datetime_utc', { ascending: false })
+          .limit(300)
+
+        if (captionsError) {
+          throw captionsError
+        }
+
+        const rows = ((captionsData ?? []) as PersistedCaptionRow[]).filter(
+          (row) => typeof row.image_id === 'string' && row.image_id.trim() !== ''
+        )
+
+        if (rows.length === 0) {
+          setCaptionHistory([])
+          if (hydrateLatest) {
+            setUploadedImageUrl('')
+            setGeneratedCaptions([])
+          }
+          return
+        }
+
+        const imageIds = [...new Set(rows.map((row) => row.image_id))]
+
+        const { data: imagesData, error: imagesError } = await supabase
+          .from('images')
+          .select('id, url')
+          .in('id', imageIds)
+
+        if (imagesError) {
+          throw imagesError
+        }
+
+        const imageUrlById = new Map<string, string>()
+        for (const row of (imagesData ?? []) as PersistedImageRow[]) {
+          if (typeof row.id !== 'string') continue
+          if (typeof row.url !== 'string') continue
+          const trimmed = row.url.trim()
+          if (!trimmed) continue
+          imageUrlById.set(row.id, trimmed)
+        }
+
+        const grouped = new Map<string, CaptionHistoryGroup>()
+
+        for (const row of rows) {
+          const imageUrl = imageUrlById.get(row.image_id)
+          if (!imageUrl) continue
+
+          const current = grouped.get(row.image_id)
+          const record: CaptionRecord = {
+            id: row.id,
+            content: row.content ?? '',
+            created_datetime_utc: row.created_datetime_utc ?? '',
+            image_id: row.image_id,
+          }
+
+          if (!current) {
+            grouped.set(row.image_id, {
+              imageId: row.image_id,
+              imageUrl,
+              captions: [record],
+              latestCreatedAt: row.created_datetime_utc ?? '',
+            })
+            continue
+          }
+
+          current.captions.push(record)
+          const currentTime = new Date(current.latestCreatedAt).getTime()
+          const rowTime = new Date(row.created_datetime_utc ?? '').getTime()
+          if (!Number.isNaN(rowTime) && (Number.isNaN(currentTime) || rowTime > currentTime)) {
+            current.latestCreatedAt = row.created_datetime_utc ?? current.latestCreatedAt
+          }
+        }
+
+        const groups = [...grouped.values()].sort((a, b) => {
+          const aTime = new Date(a.latestCreatedAt).getTime()
+          const bTime = new Date(b.latestCreatedAt).getTime()
+          if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0
+          if (Number.isNaN(aTime)) return 1
+          if (Number.isNaN(bTime)) return -1
+          return bTime - aTime
+        })
+
+        setCaptionHistory(groups)
+
+        if (hydrateLatest) {
+          if (groups.length > 0) {
+            setUploadedImageUrl(groups[0].imageUrl)
+            setGeneratedCaptions(groups[0].captions)
+          } else {
+            setUploadedImageUrl('')
+            setGeneratedCaptions([])
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load saved history:', error)
+      } finally {
+        setHistoryLoading(false)
+      }
+    },
+    [supabase]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -133,6 +272,17 @@ export default function ProtectedPage() {
     }
   }, [selectedFile])
 
+  useEffect(() => {
+    if (!user) {
+      setCaptionHistory([])
+      setUploadedImageUrl('')
+      setGeneratedCaptions([])
+      return
+    }
+
+    void loadSavedHistory(user.id, true)
+  }, [user, loadSavedHistory])
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     window.location.href = '/'
@@ -145,6 +295,13 @@ export default function ProtectedPage() {
     setMessage('')
     setGeneratedCaptions([])
     setUploadedImageUrl('')
+  }
+
+  const handleLoadHistoryItem = (item: CaptionHistoryGroup) => {
+    setUploadedImageUrl(item.imageUrl)
+    setGeneratedCaptions(item.captions)
+    setStatus('success')
+    setMessage('Loaded from your saved history.')
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -249,6 +406,8 @@ export default function ProtectedPage() {
           ? `Done. Generated ${normalizedCaptions.length} caption(s).`
           : 'Pipeline completed, but no caption records were returned.'
       )
+
+      void loadSavedHistory(user.id, false)
     } catch (error: unknown) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : 'Pipeline request failed.')
@@ -312,7 +471,9 @@ export default function ProtectedPage() {
                     className={`rounded-xl border px-4 py-3 text-sm ${
                       status === 'success'
                         ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                        : 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+                        : status === 'error'
+                          ? 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+                          : 'border-sky-500/40 bg-sky-500/10 text-sky-200'
                     }`}
                   >
                     {message}
@@ -350,12 +511,42 @@ export default function ProtectedPage() {
 
                       return (
                         <div key={key} className="rounded-xl border border-white/10 bg-black/30 p-4">
-                          <p className="text-base font-medium text-white">
-                            {getCaptionText(record, index)}
-                          </p>
+                          <p className="text-base font-medium text-white">{getCaptionText(record, index)}</p>
                         </div>
                       )
                     })}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-8 rounded-xl border border-white/10 bg-black/30 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Saved History</p>
+                {historyLoading ? (
+                  <p className="mt-2 text-sm text-slate-300">Loading your saved uploads...</p>
+                ) : captionHistory.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-300">No saved history yet.</p>
+                ) : (
+                  <div className="mt-3 grid gap-3">
+                    {captionHistory.map((item) => (
+                      <div key={item.imageId} className="rounded-xl border border-white/10 bg-black/40 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-white">
+                              {item.captions.length} caption(s)
+                            </p>
+                            <p className="mt-1 text-xs text-slate-300">{formatTimestamp(item.latestCreatedAt)}</p>
+                            <p className="mt-1 truncate text-xs text-slate-400">{item.imageUrl}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleLoadHistoryItem(item)}
+                            className="rounded-full border border-white/25 px-3 py-1 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+                          >
+                            Load
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
