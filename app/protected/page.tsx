@@ -67,7 +67,7 @@ function formatTimestamp(value: string) {
   if (Number.isNaN(date.getTime())) {
     return value
   }
-  return date.toLocaleString()
+  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 async function parseErrorBody(response: Response) {
@@ -501,7 +501,7 @@ export default function ProtectedPage() {
                 {generatedCaptions.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-300">No generated captions yet.</p>
                 ) : (
-                  <div className="mt-3 grid gap-3">
+                  <div className="mt-3 grid max-h-72 gap-3 overflow-y-auto pr-1">
                     {generatedCaptions.map((record, index) => {
                       const keyValue = record.id
                       const key =
@@ -526,21 +526,21 @@ export default function ProtectedPage() {
                 ) : captionHistory.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-300">No saved history yet.</p>
                 ) : (
-                  <div className="mt-3 grid gap-3">
+                  <div className="mt-3 grid max-h-72 gap-3 overflow-y-auto pr-1">
                     {captionHistory.map((item) => (
                       <div key={item.imageId} className="rounded-xl border border-white/10 bg-black/40 p-3">
                         <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-white">
                               {item.captions.length} caption(s)
                             </p>
                             <p className="mt-1 text-xs text-slate-300">{formatTimestamp(item.latestCreatedAt)}</p>
-                            <p className="mt-1 truncate text-xs text-slate-400">{item.imageUrl}</p>
+                            <p title={item.imageUrl} className="mt-1 truncate text-xs text-slate-400">{item.imageUrl}</p>
                           </div>
                           <button
                             type="button"
                             onClick={() => handleLoadHistoryItem(item)}
-                            className="rounded-full border border-white/25 px-3 py-1 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+                            className="shrink-0 rounded-full border border-white/25 px-3 py-1 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
                           >
                             Load
                           </button>
