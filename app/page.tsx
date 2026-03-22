@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 interface Caption {
   id: string
-  content: string
+  content: string | null
   created_datetime_utc: string
   is_public: boolean
   profile_id: string
@@ -452,6 +452,8 @@ interface CaptionCardProps {
 
 const CaptionCard: React.FC<CaptionCardProps> = ({ caption, canVote, userVote, status, message, onVote }) => {
   const [imageError, setImageError] = useState(false)
+  const captionText = typeof caption.content === 'string' ? caption.content : ''
+  const captionPreview = captionText.trim() ? captionText.substring(0, 30) : 'Untitled caption'
 
   const handleImageError = () => {
     setImageError(true)
@@ -462,7 +464,7 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption, canVote, userVote, s
       {caption.imageUrl && !imageError ? (
         <img
           src={caption.imageUrl}
-          alt={`Image for caption: ${caption.content.substring(0, 30)}`}
+          alt={`Image for caption: ${captionPreview}`}
           className="w-full h-48 object-cover"
           onError={handleImageError}
         />
@@ -474,7 +476,7 @@ const CaptionCard: React.FC<CaptionCardProps> = ({ caption, canVote, userVote, s
         </div>
       )}
       <div className="p-6">
-        <p className="text-lg font-medium text-gray-100 mb-2">{caption.content}</p>
+        <p className="text-lg font-medium text-gray-100 mb-2">{captionText || 'Untitled caption'}</p>
         <p className="text-sm text-gray-400">
           {new Date(caption.created_datetime_utc).toLocaleDateString()}
         </p>
