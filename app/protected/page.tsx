@@ -67,7 +67,11 @@ function formatTimestamp(value: string) {
   if (Number.isNaN(date.getTime())) {
     return value
   }
-  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  try {
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  } catch {
+    return date.toLocaleString()
+  }
 }
 
 async function parseErrorBody(response: Response) {
@@ -106,7 +110,15 @@ async function callPipelineApi<T>(path: string, token: string, payload: Record<s
 }
 
 export default function ProtectedPage() {
-  const supabase = useMemo(() => createClient(), [])
+  const { supabase, supabaseInitError } = useMemo(() => {
+    try {
+      return { supabase: createClient(), supabaseInitError: '' }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to initialize Supabase client.'
+      console.error('Supabase client init error:', error)
+      return { supabase: null, supabaseInitError: message }
+    }
+  }, [])
   const [user, setUser] = useState<User | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -119,6 +131,11 @@ export default function ProtectedPage() {
 
   const loadSavedHistory = useCallback(
     async (profileId: string, hydrateLatest: boolean) => {
+      if (!supabase) {
+        setHistoryLoading(false)
+        return
+      }
+
       setHistoryLoading(true)
 
       try {
@@ -228,6 +245,11 @@ export default function ProtectedPage() {
   )
 
   useEffect(() => {
+    if (!supabase) {
+      setUser(null)
+      return
+    }
+
     let cancelled = false
 
     const syncUser = async () => {
@@ -284,6 +306,7 @@ export default function ProtectedPage() {
   }, [user, loadSavedHistory])
 
   const handleSignOut = async () => {
+    if (!supabase) return
     await supabase.auth.signOut()
     window.location.href = '/'
   }
@@ -310,6 +333,12 @@ export default function ProtectedPage() {
     setMessage('')
     setGeneratedCaptions([])
     setUploadedImageUrl('')
+
+    if (!supabase) {
+      setStatus('error')
+      setMessage('App configuration error. Please contact support.')
+      return
+    }
 
     if (!user) {
       setStatus('error')
@@ -412,6 +441,22 @@ export default function ProtectedPage() {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : 'Pipeline request failed.')
     }
+  }
+
+  if (supabaseInitError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-black text-white">
+        <main className="container mx-auto px-6 py-16">
+          <div className="mx-auto max-w-2xl rounded-2xl border border-rose-500/40 bg-rose-500/10 p-6">
+            <h1 className="text-2xl font-bold text-rose-200">Configuration Error</h1>
+            <p className="mt-3 text-sm text-rose-100">
+              This deployment is missing required Supabase environment variables.
+            </p>
+            <p className="mt-2 break-words text-xs text-rose-100/90">{supabaseInitError}</p>
+          </div>
+        </main>
+      </div>
+    )
   }
 
   return (
