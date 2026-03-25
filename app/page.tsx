@@ -40,11 +40,22 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [pageInput, setPageInput] = useState('1')
+  const [searchInput, setSearchInput] = useState('')
+  const [captionQuery, setCaptionQuery] = useState('')
   const [user, setUser] = useState<User | null>(null)
   const [userVotes, setUserVotes] = useState<Record<string, number>>({})
   const [voteStatus, setVoteStatus] = useState<Record<string, 'idle' | 'saving' | 'success' | 'error'>>({})
   const [voteMessage, setVoteMessage] = useState<Record<string, string>>({})
   const captionsPerPage = 36
+  const normalizedCaptionQuery = captionQuery.trim().toLowerCase()
+  const filteredCaptions = useMemo(() => {
+    if (!normalizedCaptionQuery) return captions
+
+    return captions.filter((caption) => {
+      const content = typeof caption.content === 'string' ? caption.content : ''
+      return content.toLowerCase().includes(normalizedCaptionQuery)
+    })
+  }, [captions, normalizedCaptionQuery])
 
   async function fetchCaptions() {
     if (!supabase) {
@@ -239,6 +250,16 @@ export default function Home() {
     goToPage(parsedPage)
   }
 
+  const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setCaptionQuery(searchInput)
+  }
+
+  const handleClearSearch = () => {
+    setSearchInput('')
+    setCaptionQuery('')
+  }
+
   const handleSignIn = async () => {
     if (!supabase) return
 
@@ -356,6 +377,39 @@ export default function Home() {
           </p>
         </header>
 
+        <form onSubmit={handleSearchSubmit} className="mx-auto mb-8 flex max-w-2xl flex-col gap-3">
+          <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Search Captions</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Search by caption text"
+              className="min-w-[220px] flex-1 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm text-white placeholder:text-gray-500 focus:border-white/40 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="rounded-full border border-white/25 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+            >
+              Search
+            </button>
+            {(searchInput || captionQuery) && (
+              <button
+                type="button"
+                onClick={handleClearSearch}
+                className="rounded-full border border-white/25 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          {normalizedCaptionQuery && (
+            <p className="text-xs text-gray-400">
+              Showing results for <span className="font-medium text-gray-200">{captionQuery.trim()}</span>
+            </p>
+          )}
+        </form>
+
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -366,10 +420,14 @@ export default function Home() {
           <div className="text-center py-12">
             <p className="text-xl text-gray-400">No captions with images found on this page.</p>
           </div>
+        ) : filteredCaptions.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-xl text-gray-400">No captions match your search on this page.</p>
+          </div>
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-              {captions.map((caption) => (
+              {filteredCaptions.map((caption) => (
                 <CaptionCard
                   key={caption.id}
                   caption={caption}
