@@ -62,6 +62,11 @@ function getCaptionText(record: CaptionRecord, index: number) {
   return `Caption ${index + 1}`
 }
 
+function captionMatchesQuery(record: CaptionRecord, index: number, query: string) {
+  if (!query) return true
+  return getCaptionText(record, index).toLowerCase().includes(query)
+}
+
 function formatTimestamp(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
@@ -125,9 +130,26 @@ export default function ProtectedPage() {
   const [uploadedImageUrl, setUploadedImageUrl] = useState('')
   const [generatedCaptions, setGeneratedCaptions] = useState<CaptionRecord[]>([])
   const [captionHistory, setCaptionHistory] = useState<CaptionHistoryGroup[]>([])
+  const [searchInput, setSearchInput] = useState('')
+  const [captionQuery, setCaptionQuery] = useState('')
   const [historyLoading, setHistoryLoading] = useState(false)
   const [status, setStatus] = useState<UiStatus>('idle')
   const [message, setMessage] = useState('')
+  const normalizedCaptionQuery = captionQuery.trim().toLowerCase()
+
+  const filteredGeneratedCaptions = useMemo(() => {
+    if (!normalizedCaptionQuery) return generatedCaptions
+    return generatedCaptions.filter((record, index) =>
+      captionMatchesQuery(record, index, normalizedCaptionQuery)
+    )
+  }, [generatedCaptions, normalizedCaptionQuery])
+
+  const filteredCaptionHistory = useMemo(() => {
+    if (!normalizedCaptionQuery) return captionHistory
+    return captionHistory.filter((item) =>
+      item.captions.some((record, index) => captionMatchesQuery(record, index, normalizedCaptionQuery))
+    )
+  }, [captionHistory, normalizedCaptionQuery])
 
   const loadSavedHistory = useCallback(
     async (profileId: string, hydrateLatest: boolean) => {
@@ -443,6 +465,16 @@ export default function ProtectedPage() {
     }
   }
 
+  const handleSearchSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
+    setCaptionQuery(searchInput)
+  }
+
+  const handleClearSearch = () => {
+    setSearchInput('')
+    setCaptionQuery('')
+  }
+
   if (supabaseInitError) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-black text-white">
@@ -479,9 +511,6 @@ export default function ProtectedPage() {
           {user ? (
             <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Caption Pipeline Upload</p>
-              <p className="mt-2 text-sm text-slate-300">
-                Upload an image and run the 4-step pipeline with your JWT access token.
-              </p>
 
               <form onSubmit={handleSubmit} className="mt-4 grid gap-4">
                 <label className="grid gap-2 text-sm text-slate-200">
@@ -534,6 +563,39 @@ export default function ProtectedPage() {
                 </button>
               </form>
 
+              <form onSubmit={handleSearchSubmit} className="mt-6 grid gap-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Search Captions</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
+                    placeholder="Search by caption text"
+                    className="min-w-[220px] flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-full border border-white/25 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+                  >
+                    Search
+                  </button>
+                  {(searchInput || captionQuery) && (
+                    <button
+                      type="button"
+                      onClick={handleClearSearch}
+                      className="rounded-full border border-white/25 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {normalizedCaptionQuery && (
+                  <p className="text-xs text-slate-400">
+                    Showing results for <span className="font-medium text-slate-200">{captionQuery.trim()}</span>
+                  </p>
+                )}
+              </form>
+
               {uploadedImageUrl && (
                 <div className="mt-6 rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm">
                   <p className="text-sky-100">Registered image URL:</p>
@@ -553,9 +615,11 @@ export default function ProtectedPage() {
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Generated Captions</p>
                 {generatedCaptions.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-300">No generated captions yet.</p>
+                ) : filteredGeneratedCaptions.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-300">No generated captions match your search.</p>
                 ) : (
                   <div className="mt-3 grid max-h-72 gap-3 overflow-y-auto pr-1">
-                    {generatedCaptions.map((record, index) => {
+                    {filteredGeneratedCaptions.map((record, index) => {
                       const keyValue = record.id
                       const key =
                         typeof keyValue === 'string' || typeof keyValue === 'number'
@@ -578,9 +642,11 @@ export default function ProtectedPage() {
                   <p className="mt-2 text-sm text-slate-300">Loading your saved uploads...</p>
                 ) : captionHistory.length === 0 ? (
                   <p className="mt-2 text-sm text-slate-300">No saved history yet.</p>
+                ) : filteredCaptionHistory.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-300">No saved history captions match your search.</p>
                 ) : (
                   <div className="mt-3 grid max-h-72 gap-3 overflow-y-auto pr-1">
-                    {captionHistory.map((item) => (
+                    {filteredCaptionHistory.map((item) => (
                       <div key={item.imageId} className="rounded-xl border border-white/10 bg-black/40 p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
