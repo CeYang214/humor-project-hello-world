@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 interface Caption {
   id: string
@@ -57,7 +57,7 @@ export default function Home() {
     })
   }, [captions, normalizedCaptionQuery])
 
-  async function fetchCaptions() {
+  const fetchCaptions = useCallback(async () => {
     if (!supabase) {
       setCaptions([])
       setLoading(false)
@@ -141,11 +141,11 @@ export default function Home() {
         setTotalPages(Math.ceil(count / (captionsPerPage * fetchMultiplier)))
       }
     }
-  }
+  }, [currentPage, supabase])
 
   useEffect(() => {
     void fetchCaptions()
-  }, [currentPage])
+  }, [fetchCaptions])
 
   useEffect(() => {
     setPageInput(String(currentPage))
@@ -336,46 +336,74 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
       <main className="container mx-auto px-4 py-12">
-        <div className="mb-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
-          <div className="text-sm text-gray-300">
-            {user ? (
-              <span>Signed in as {user.email ?? 'Google user'}</span>
-            ) : (
-              <span>Sign in to access the gated route.</span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/protected"
-              className="rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
-            >
-              Go to Gated Route
-            </Link>
-            {user ? (
-              <button
-                onClick={handleSignOut}
-                className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
-              >
-                Sign out
-              </button>
-            ) : (
-              <button
-                onClick={handleSignIn}
-                className="rounded-full bg-gradient-to-r from-blue-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-sky-600"
-              >
-                Continue with Google
-              </button>
-            )}
-          </div>
-        </div>
-        <header className="text-center mb-12">
-          <h1 className="text-5xl font-extrabold tracking-tight mb-4 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
-            Caption Gallery
+        <header className="mx-auto mb-10 max-w-4xl text-center">
+          <p className="text-sm uppercase tracking-[0.25em] text-sky-300/80">Caption + Joke Studio</p>
+          <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-blue-300 to-sky-500 sm:text-5xl">
+            Browse Captions, Vote, and Generate Jokes from Your Images
           </h1>
-          <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-            A curated collection of creative and witty captions, paired with their inspiring images.
+          <p className="mx-auto mt-4 max-w-3xl text-base text-gray-200 sm:text-lg">
+            Use the public gallery to explore and search image captions. Sign in only if you want to generate your own captions from uploaded images and save your history.
           </p>
         </header>
+
+        <section className="mx-auto mb-10 grid max-w-5xl gap-4 md:grid-cols-2">
+          <article className="rounded-2xl border border-white/15 bg-white/5 p-6 backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/90">No Sign-In Needed</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">Explore the caption gallery</h2>
+            <p className="mt-3 text-sm text-gray-300">
+              Browse and search public captions immediately. You can view the gallery without creating an account.
+            </p>
+            <a
+              href="#caption-gallery"
+              className="mt-4 inline-flex rounded-full border border-white/25 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+            >
+              Jump to Gallery
+            </a>
+          </article>
+
+          <article className="rounded-2xl border border-sky-300/30 bg-sky-500/10 p-6 backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.18em] text-sky-200">Sign-In Feature</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">Generate jokes from your own image</h2>
+            <p className="mt-3 text-sm text-sky-100">
+              Signing in unlocks the joke generator workspace where you can upload an image, generate captions, and revisit saved results.
+            </p>
+            <p className="mt-3 text-xs text-sky-100/90">
+              {user ? `Signed in as ${user.email ?? 'Google user'}.` : 'Continue with Google to unlock image upload and caption generation.'}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              {user ? (
+                <>
+                  <Link
+                    href="/protected"
+                    className="rounded-full border border-white/25 px-4 py-2 text-xs font-semibold text-white transition hover:border-white/40 hover:bg-white/10"
+                  >
+                    Open Joke Generator
+                  </Link>
+                  <button
+                    onClick={handleSignOut}
+                    className="rounded-full bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+                  >
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleSignIn}
+                  className="rounded-full bg-gradient-to-r from-blue-500 to-sky-500 px-4 py-2 text-xs font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-sky-600"
+                >
+                  Continue with Google
+                </button>
+              )}
+            </div>
+          </article>
+        </section>
+
+        <section id="caption-gallery" className="mb-6 text-center">
+          <h2 className="text-2xl font-bold text-white sm:text-3xl">Community Caption Gallery</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-300">
+            Search public captions and vote on your favorites.
+          </p>
+        </section>
 
         <form onSubmit={handleSearchSubmit} className="mx-auto mb-8 flex max-w-2xl flex-col gap-3">
           <p className="text-xs uppercase tracking-[0.2em] text-gray-400">Search Captions</p>

@@ -463,14 +463,14 @@ export default function ProtectedPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-black text-white">
       <main className="container mx-auto px-6 py-16">
         <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-white/5 p-10 shadow-2xl backdrop-blur">
-          <p className="text-sm uppercase tracking-[0.3em] text-sky-300/80">Gated</p>
-          <h1 className="mt-4 text-4xl font-bold">You made it inside.</h1>
+          <p className="text-sm uppercase tracking-[0.3em] text-sky-300/80">Joke Generator</p>
+          <h1 className="mt-4 text-4xl font-bold">Generate captions from your own images</h1>
           <p className="mt-3 text-lg text-slate-200">
-            This route is protected by Supabase auth + middleware. Only signed-in users can see it.
+            You unlocked this creator workspace by signing in. Upload an image to generate caption ideas and revisit your saved results below.
           </p>
 
           <div className="mt-8 rounded-2xl border border-white/10 bg-black/40 p-6">
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Session</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Account</p>
             <p className="mt-2 text-base text-white">
               {user?.email ? `Signed in as ${user.email}` : 'Loading account details...'}
             </p>
@@ -527,7 +527,7 @@ export default function ProtectedPage() {
                   disabled={status === 'saving'}
                   className="mt-2 w-fit rounded-full bg-gradient-to-r from-blue-500 to-sky-500 px-6 py-2 text-sm font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {status === 'saving' ? 'Running Pipeline...' : 'Upload & Generate Captions'}
+                  {status === 'saving' ? 'Running Pipeline...' : 'Upload & Generate Jokes'}
                 </button>
               </form>
 
