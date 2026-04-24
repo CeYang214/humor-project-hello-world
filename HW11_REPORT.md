@@ -34,6 +34,6 @@ Why: One user felt briefly disoriented after sign-in and needed time to understa
 - `app/layout.tsx`
 
 ## Vercel Links (commit-specific)
-- Caption creation + rating app: <ADD_URL>
-- Admin area app: <ADD_URL>
-- Prompt chain tool app: <ADD_URL>
+- Caption creation + rating app: humor-project-hello-world-33r5qre10-cecilia-yangs-projects.vercel.app
+- Admin area app: humor-project-part-2-pglky8u1i-cecilia-yangs-projects.vercel.app
+- Prompt chain tool app: humor-project-part-3-i0r7dydll-cecilia-yangs-projects.vercel.app
